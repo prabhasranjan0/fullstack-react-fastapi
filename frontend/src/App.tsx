@@ -1,5 +1,12 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent, ChangeEvent } from "react";
+import { useAppDispatch, useAppSelector } from "./app/hooks";
+import {
+  fetchTodos,
+  addTodo,
+  updateTodo,
+  deleteTodo,
+} from "./features/todos/todosSlice";
 import "./App.css";
 
 interface Todo {
@@ -9,75 +16,53 @@ interface Todo {
 }
 
 function App() {
-  const [todos, setTodos] = useState<Todo[]>([]);
+  const dispatch = useAppDispatch();
+  const todos = useAppSelector((state) => state.todos.items);
+  const status = useAppSelector((state) => state.todos.status);
+  const error = useAppSelector((state) => state.todos.error);
+
   const [newTodo, setNewTodo] = useState("");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
 
   useEffect(() => {
-    fetchTodos();
-  }, []);
-
-  const fetchTodos = async () => {
-    try {
-      const response = await fetch("http://localhost:8000/todos");
-      const data = await response.json();
-      setTodos(data);
-    } catch (error) {
-      console.error("Error fetching todos:", error);
+    if (status === "idle") {
+      dispatch(fetchTodos()).catch((err) => {
+        console.error("Failed to fetch todos:", err);
+      });
     }
-  };
+  }, [status, dispatch]);
 
-  const addTodo = async (e: FormEvent<HTMLFormElement>) => {
+  const handleAddTodo = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!newTodo.trim()) return;
 
     try {
-      const response = await fetch("http://localhost:8000/todos", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          title: newTodo,
-          completed: false,
-        }),
-      });
-      const data = await response.json();
-      setTodos([...todos, data]);
+      await dispatch(addTodo(newTodo)).unwrap();
       setNewTodo("");
-    } catch (error) {
-      console.error("Error adding todo:", error);
+    } catch (err) {
+      console.error("Failed to add todo:", err);
     }
   };
 
-  const toggleTodo = async (todo: Todo) => {
+  const handleToggleTodo = async (todo: Todo) => {
     try {
-      const response = await fetch(`http://localhost:8000/todos/${todo.id}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
+      await dispatch(
+        updateTodo({
           ...todo,
           completed: !todo.completed,
-        }),
-      });
-      const updatedTodo = await response.json();
-      setTodos(todos.map((t: Todo) => (t.id === todo.id ? updatedTodo : t)));
-    } catch (error) {
-      console.error("Error updating todo:", error);
+        })
+      ).unwrap();
+    } catch (err) {
+      console.error("Failed to toggle todo:", err);
     }
   };
 
-  const deleteTodo = async (id: number) => {
+  const handleDeleteTodo = async (id: number) => {
     try {
-      await fetch(`http://localhost:8000/todos/${id}`, {
-        method: "DELETE",
-      });
-      setTodos(todos.filter((todo: Todo) => todo.id !== id));
-    } catch (error) {
-      console.error("Error deleting todo:", error);
+      await dispatch(deleteTodo(id)).unwrap();
+    } catch (err) {
+      console.error("Failed to delete todo:", err);
     }
   };
 
@@ -95,28 +80,38 @@ function App() {
     setEditingTitle("");
   };
 
-  const submitEdit = async (todo: Todo) => {
+  const handleSubmitEdit = async (todo: Todo) => {
     if (editingTitle.trim() === "") return;
 
     try {
-      const response = await fetch(`http://localhost:8000/todos/${todo.id}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
+      await dispatch(
+        updateTodo({
           ...todo,
           title: editingTitle,
-        }),
-      });
-      const updatedTodo = await response.json();
-      setTodos(todos.map((t: Todo) => (t.id === todo.id ? updatedTodo : t)));
+        })
+      ).unwrap();
       setEditingId(null);
       setEditingTitle("");
-    } catch (error) {
-      console.error("Error updating todo:", error);
+    } catch (err) {
+      console.error("Failed to update todo:", err);
     }
   };
+
+  if (status === "loading") {
+    return (
+      <div className="todo-app">
+        <div className="loading">Loading todos...</div>
+      </div>
+    );
+  }
+
+  if (status === "failed") {
+    return (
+      <div className="todo-app">
+        <div className="error">Error: {error || "Failed to load todos"}</div>
+      </div>
+    );
+  }
 
   return (
     <div className="todo-app">
@@ -124,7 +119,7 @@ function App() {
         <h1>Todo App</h1>
       </header>
 
-      <form onSubmit={addTodo} className="todo-form">
+      <form onSubmit={handleAddTodo} className="todo-form">
         <input
           type="text"
           className="todo-input"
@@ -137,59 +132,63 @@ function App() {
         </button>
       </form>
 
-      <ul className="todo-list">
-        {todos.map((todo) => (
-          <li key={todo.id} className="todo-item">
-            <input
-              type="checkbox"
-              checked={todo.completed}
-              onChange={() => toggleTodo(todo)}
-              className="todo-checkbox"
-            />
-            {editingId === todo.id ? (
-              <div className="todo-edit-form">
-                <input
-                  type="text"
-                  className="todo-input edit-input"
-                  value={editingTitle}
-                  onChange={(e) => setEditingTitle(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") submitEdit(todo);
-                    if (e.key === "Escape") cancelEditing();
-                  }}
-                  autoFocus
-                />
-                <button
-                  onClick={() => submitEdit(todo)}
-                  className="todo-button edit-button"
+      {todos.length === 0 ? (
+        <p className="empty-list">No todos yet. Add one above!</p>
+      ) : (
+        <ul className="todo-list">
+          {todos.map((todo) => (
+            <li key={todo.id} className="todo-item">
+              <input
+                type="checkbox"
+                checked={todo.completed}
+                onChange={() => handleToggleTodo(todo)}
+                className="todo-checkbox"
+              />
+              {editingId === todo.id ? (
+                <div className="todo-edit-form">
+                  <input
+                    type="text"
+                    className="todo-input edit-input"
+                    value={editingTitle}
+                    onChange={(e) => setEditingTitle(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleSubmitEdit(todo);
+                      if (e.key === "Escape") cancelEditing();
+                    }}
+                    autoFocus
+                  />
+                  <button
+                    onClick={() => handleSubmitEdit(todo)}
+                    className="todo-button edit-button"
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={cancelEditing}
+                    className="todo-button cancel-button"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <span
+                  className={`todo-text ${todo.completed ? "completed" : ""}`}
+                  onDoubleClick={() => startEditing(todo)}
                 >
-                  Save
-                </button>
-                <button
-                  onClick={cancelEditing}
-                  className="todo-button cancel-button"
-                >
-                  Cancel
-                </button>
-              </div>
-            ) : (
-              <span
-                className={`todo-text ${todo.completed ? "completed" : ""}`}
-                onDoubleClick={() => startEditing(todo)}
+                  {todo.title}
+                </span>
+              )}
+              <button
+                onClick={() => handleDeleteTodo(todo.id)}
+                className="todo-delete"
+                aria-label="Delete todo"
               >
-                {todo.title}
-              </span>
-            )}
-            <button
-              onClick={() => deleteTodo(todo.id)}
-              className="todo-delete"
-              aria-label="Delete todo"
-            >
-              ×
-            </button>
-          </li>
-        ))}
-      </ul>
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
